@@ -1,0 +1,1284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>大学城美食地图 - 最终版</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <!-- Leaflet地图库 -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        /* 核心样式 */
+        #map {
+            position: relative;
+            width: 100%;
+            height: 70vh;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid #DEE2E6;
+        }
+        
+        /* 缩小版图例样式 - 避免遮挡地图缩放控件 */
+        .map-legend {
+            position: absolute;
+            top: 10px;
+            right: 10px; /* 移到右侧，避开缩放控件 */
+            background: white;
+            padding: 8px;
+            border-radius: 6px;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.1);
+            z-index: 1000;
+            font-size: 11px;
+            max-width: 120px;
+        }
+        .legend-title {
+            font-weight: bold;
+            font-size: 12px;
+            margin-bottom: 5px;
+            text-align: center;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 3px;
+            line-height: 1.2;
+        }
+        .legend-color {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 5px;
+            border: 1px solid #fff;
+        }
+        
+        /* 餐厅标签样式 */
+        .restaurant-label {
+            font-size: 10px;
+            font-weight: bold;
+            white-space: nowrap;
+            background: rgba(255,255,255,0.8);
+            padding: 1px 4px;
+            border-radius: 3px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        
+        /* 餐厅列表样式 */
+        .restaurant-list {
+            height: 70vh;
+            overflow-y: auto;
+        }
+        .restaurant-item {
+            padding: 12px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .restaurant-item:hover {
+            background-color: #f8f9fa;
+        }
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-right: 5px;
+            margin-top: 5px;
+        }
+        
+        /* 弹窗样式 */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background-color: white;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+            padding: 20px;
+            position: relative;
+        }
+        .modal-sm {
+            max-width: 600px;
+        }
+        .close-modal {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            font-size: 20px;
+            cursor: pointer;
+            color: #666;
+        }
+        
+        /* 排序翻转按钮 */
+        .sort-toggle {
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .sort-toggle.flipped {
+            transform: rotate(180deg);
+        }
+        
+        /* 响应式适配 */
+        @media (max-width: 768px) {
+            .filter-row {
+                flex-direction: column;
+                gap: 10px !important;
+            }
+            .filter-item {
+                width: 100% !important;
+            }
+            #map, .restaurant-list {
+                height: 50vh;
+            }
+            .map-legend {
+                max-width: 100px;
+                padding: 5px;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+    <div class="container mx-auto px-4 py-5">
+        <!-- Logo区域 -->
+        <div class="text-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">
+                <i class="fa fa-cutlery text-orange-500 mr-2"></i>大学城美食地图
+            </h1>
+            <p class="text-gray-600 mt-2">专为高校学生打造的周边美食指南</p>
+        </div>
+
+        <!-- 筛选栏 - 单独一行 -->
+        <div class="bg-white p-4 rounded-lg shadow-sm mb-6">
+            <div class="filter-row flex flex-wrap gap-3 items-center justify-between">
+                <!-- 场景筛选 -->
+                <div class="filter-item w-auto">
+                    <label class="text-gray-700 mr-2">场景：</label>
+                    <select id="filter-scene" class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        <option value="all">全部场景</option>
+                        <option value="single">正餐-一人食（自习）</option>
+                        <option value="date">正餐-约会</option>
+                        <option value="party">正餐-聚餐</option>
+                        <option value="afternoon">下午茶/咖啡</option>
+                        <option value="night">夜宵</option>
+                        <option value="convenience">便利店</option>
+                    </select>
+                </div>
+
+                <!-- 菜品筛选 -->
+                <div class="filter-item w-auto">
+                    <label class="text-gray-700 mr-2">菜品：</label>
+                    <select id="filter-cuisine" class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        <option value="all">全部菜式</option>
+                        <option value="sichuan">川菜</option>
+                        <option value="beijing">京菜</option>
+                        <option value="hunan">湘菜</option>
+                        <option value="guangdong">粤菜</option>
+                        <option value="jiangzhe">江浙菜</option>
+                        <option value="yungui">云贵菜</option>
+                        <option value="japan_korea">日韩</option>
+                        <option value="western">西餐</option>
+                        <option value="other">其他</option>
+                    </select>
+                </div>
+
+                <!-- 排序筛选 -->
+                <div class="filter-item w-auto flex items-center">
+                    <label class="text-gray-700 mr-2">排序：</label>
+                    <select id="filter-sort" class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        <option value="rating">评分</option>
+                        <option value="price">人均</option>
+                        <option value="distance">距离</option>
+                    </select>
+                    <button id="sort-toggle" class="sort-toggle ml-2 px-2 py-1 border border-gray-300 rounded hover:bg-gray-100">
+                        <i class="fa fa-sort-amount-desc"></i>
+                    </button>
+                    <span id="sort-direction" class="ml-1 text-gray-600">高→低</span>
+                </div>
+
+                <!-- 搜索框 -->
+                <div class="filter-item w-auto relative">
+                    <label class="text-gray-700 mr-2">搜索：</label>
+                    <input type="text" id="search-input" placeholder="餐厅名称/菜品" 
+                           class="px-3 py-2 pl-10 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <i class="fa fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                </div>
+
+                <!-- 添加餐厅按钮 -->
+                <div class="filter-item w-auto">
+                    <button id="add-restaurant-btn" class="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 transition">
+                        <i class="fa fa-plus mr-1"></i> 添加餐厅
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主内容区 -->
+        <div class="flex flex-col lg:flex-row gap-6">
+            <!-- 地图区域 -->
+            <div class="w-full lg:w-2/3">
+                <div id="map">
+                    <!-- 缩小版图例 - 移到右侧 -->
+                    <div class="map-legend">
+                        <div class="legend-title">图例</div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: #FF9800;"></div>
+                            <span>一人食</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: #E91E63;"></div>
+                            <span>约会</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: #9C27B0;"></div>
+                            <span>聚餐</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: #FF5722;"></div>
+                            <span>下午茶</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: #F44336;"></div>
+                            <span>夜宵</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: #4CAF50;"></div>
+                            <span>便利店</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 餐厅列表面板 -->
+            <div class="w-full lg:w-1/3 bg-white rounded-lg shadow-sm p-5 restaurant-list" id="restaurant-list">
+                <!-- 餐厅列表将动态生成 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 餐厅详情弹窗 -->
+    <div id="detail-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" id="close-detail">&times;</span>
+            <div id="detail-content"></div>
+        </div>
+    </div>
+
+    <!-- 评价弹窗 -->
+    <div id="review-modal" class="modal">
+        <div class="modal-content modal-sm">
+            <span class="close-modal" id="close-review">&times;</span>
+            <div id="review-content"></div>
+        </div>
+    </div>
+
+    <!-- 添加餐厅弹窗 -->
+    <div id="add-modal" class="modal">
+        <div class="modal-content modal-sm">
+            <span class="close-modal" id="close-add">&times;</span>
+            <h2 class="text-xl font-bold mb-4">添加周边餐厅</h2>
+            <form id="add-restaurant-form">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-gray-700 mb-1">餐厅名称 *</label>
+                        <input type="text" name="name" required class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 mb-1">场景标签 *</label>
+                        <div class="flex flex-wrap gap-2">
+                            <label class="flex items-center gap-1"><input type="checkbox" name="scene" value="single"> 一人食</label>
+                            <label class="flex items-center gap-1"><input type="checkbox" name="scene" value="date"> 约会</label>
+                            <label class="flex items-center gap-1"><input type="checkbox" name="scene" value="party"> 聚餐</label>
+                            <label class="flex items-center gap-1"><input type="checkbox" name="scene" value="afternoon"> 下午茶</label>
+                            <label class="flex items-center gap-1"><input type="checkbox" name="scene" value="night"> 夜宵</label>
+                            <label class="flex items-center gap-1"><input type="checkbox" name="scene" value="convenience"> 便利店</label>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 mb-1">菜式分类 *</label>
+                        <select name="cuisine" required class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <option value="">请选择</option>
+                            <option value="sichuan">川菜</option>
+                            <option value="beijing">京菜</option>
+                            <option value="hunan">湘菜</option>
+                            <option value="guangdong">粤菜</option>
+                            <option value="jiangzhe">江浙菜</option>
+                            <option value="yungui">云贵菜</option>
+                            <option value="japan_korea">日韩</option>
+                            <option value="western">西餐</option>
+                            <option value="other">其他</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 mb-1">人均消费（元）*</label>
+                        <input type="number" name="price" required min="0" class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 mb-1">评分（1-5）*</label>
+                        <input type="number" name="rating" required min="1" max="5" step="0.1" class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 mb-1">距离（km）*</label>
+                        <input type="number" name="distance" required min="0" step="0.1" class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 mb-1">详细地址 *</label>
+                        <input type="text" name="address" required class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 mb-1">营业时长</label>
+                        <input type="text" name="hours" placeholder="如：10:00-22:00" class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 mb-1">推荐菜</label>
+                    <input type="text" name="recommend" placeholder="用逗号分隔" class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 mb-1">特色标签</label>
+                    <input type="text" name="tags" placeholder="用逗号分隔，如：自习友好,免费WiFi" class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 mb-1">特色描述</label>
+                    <textarea name="desc" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
+                </div>
+                <div class="flex justify-end gap-3">
+                    <button type="button" id="cancel-add" class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100">取消</button>
+                    <button type="submit" class="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600">提交审核</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 成功提示弹窗 -->
+    <div id="success-modal" class="modal">
+        <div class="modal-content text-center modal-sm">
+            <i class="fa fa-check-circle text-4xl text-green-500 mb-3"></i>
+            <h3 class="text-xl font-bold mb-2">提交成功！</h3>
+            <p class="text-gray-600 mb-4">餐厅信息已提交，审核通过后将显示在地图上</p>
+            <button id="close-success" class="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600">确定</button>
+        </div>
+    </div>
+
+    <script>
+        // 1. 初始化Leaflet地图
+        // 高校坐标（模拟）
+        const universityCoords = {
+            yanjing: [39.990, 116.397],    // 燕京大学
+            huaqing: [40.005, 116.412],     // 华清大学
+            normal: [39.985, 116.405]       // 师范大学
+        };
+        // 地图中心（3所高校中间）
+        const mapCenter = [39.993, 116.405];
+        // 初始化地图 - 设置合适的缩放级别（15级，更近更清晰）
+        const map = L.map('map').setView(mapCenter, 15); // 缩放级别提高到15，更靠近校园
+        
+        // 添加Leaflet地图图层
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            minZoom: 14,  // 最小缩放（更大范围）
+            maxZoom: 17   // 最大缩放（更细节）
+        }).addTo(map);
+
+        // 2. 绘制高校区域（放大校园面积，学校名称显示在蓝色范围内）
+        const drawUniversityArea = () => {
+            // 燕京大学区域（放大面积）
+            const yanjingArea = L.polygon([
+                [39.987, 116.394],
+                [39.993, 116.394],
+                [39.993, 116.401],
+                [39.987, 116.401]
+            ], {
+                color: '#1E88E5',
+                fillColor: '#BBDEFB',
+                fillOpacity: 0.3,
+                weight: 2
+            }).addTo(map);
+            
+            // 燕京大学校名标签（显示在区域内部）
+            L.marker([39.990, 116.3975], {
+                icon: L.divIcon({
+                    className: 'university-label',
+                    html: '<div style="font-weight:bold; font-size:14px; color:#1E88E5; background:rgba(255,255,255,0.8); padding:2px 8px; border-radius:4px;">燕京大学</div>',
+                    iconSize: [80, 30],
+                    iconAnchor: [40, 15]
+                })
+            }).addTo(map);
+
+            // 华清大学区域（放大面积）
+            const huaqingArea = L.polygon([
+                [40.002, 116.409],
+                [40.008, 116.409],
+                [40.008, 116.416],
+                [40.002, 116.416]
+            ], {
+                color: '#1E88E5',
+                fillColor: '#BBDEFB',
+                fillOpacity: 0.3,
+                weight: 2
+            }).addTo(map);
+            
+            // 华清大学校名标签（显示在区域内部）
+            L.marker([40.005, 116.4125], {
+                icon: L.divIcon({
+                    className: 'university-label',
+                    html: '<div style="font-weight:bold; font-size:14px; color:#1E88E5; background:rgba(255,255,255,0.8); padding:2px 8px; border-radius:4px;">华清大学</div>',
+                    iconSize: [80, 30],
+                    iconAnchor: [40, 15]
+                })
+            }).addTo(map);
+
+            // 师范大学区域（放大面积）
+            const normalArea = L.polygon([
+                [39.982, 116.402],
+                [39.988, 116.402],
+                [39.988, 116.409],
+                [39.982, 116.409]
+            ], {
+                color: '#1E88E5',
+                fillColor: '#BBDEFB',
+                fillOpacity: 0.3,
+                weight: 2
+            }).addTo(map);
+            
+            // 师范大学校名标签（显示在区域内部）
+            L.marker([39.985, 116.4055], {
+                icon: L.divIcon({
+                    className: 'university-label',
+                    html: '<div style="font-weight:bold; font-size:14px; color:#1E88E5; background:rgba(255,255,255,0.8); padding:2px 8px; border-radius:4px;">师范大学</div>',
+                    iconSize: [80, 30],
+                    iconAnchor: [40, 15]
+                })
+            }).addTo(map);
+        };
+        drawUniversityArea();
+
+        // 3. 餐厅数据（重新调整分布，不均匀分布，部分在学校之间）
+        const restaurants = [
+            // 正餐-一人食（自习）- 不均匀分布
+            {
+                id: 1,
+                name: "静思书咖",
+                scene: ["single", "afternoon"],
+                cuisine: "western",
+                price: 32,
+                rating: 4.9,
+                distance: 0.3,
+                coords: [39.986, 116.393], // 燕京大学西侧外围
+                address: "燕京大学西门外文创街8号",
+                hours: "8:00-23:00",
+                recommend: "美式咖啡,三明治,提拉米苏",
+                desc: "提供免费WiFi和充电插座，安静自习环境，单人简餐性价比高，支持长时间停留",
+                tags: ["自习友好", "免费WiFi", "充电插座"],
+                reviews: [
+                    { content: "自习党狂喜！插座超多，WiFi很稳，咖啡不贵，久坐也不尴尬～", rating: 5, time: "3天前" },
+                    { content: "环境真的超安静，点一杯咖啡可以坐一下午，适合赶论文的期末党", rating: 5, time: "1周前" },
+                    { content: "唯一缺点是周末人有点多，建议工作日去，靠窗位置视野超棒", rating: 4, time: "2周前" }
+                ]
+            },
+            {
+                id: 2,
+                name: "一人食面馆",
+                scene: ["single"],
+                cuisine: "beijing",
+                price: 22,
+                rating: 4.7,
+                distance: 0.4,
+                coords: [40.009, 116.412], // 华清大学北侧外围
+                address: "华清大学北门小吃街12号",
+                hours: "9:00-21:00",
+                recommend: "炸酱面,卤煮,北冰洋",
+                desc: "单人份面饭套餐，分量适中，价格实惠，有靠窗单人座位，安静不吵闹",
+                tags: ["一人食", "性价比高", "安静"],
+                reviews: [
+                    { content: "一个人来吃超合适，分量刚好不浪费，炸酱面味道超正宗", rating: 5, time: "5天前" },
+                    { content: "价格真的亲民，学生党表示毫无压力，老板人也超nice", rating: 4, time: "1周前" },
+                    { content: "座位有点小，但是胜在快，适合赶课的时候快速解决午饭", rating: 4, time: "3天前" }
+                ]
+            },
+            {
+                id: 3,
+                name: "自习小厨",
+                scene: ["single"],
+                cuisine: "jiangzhe",
+                price: 28,
+                rating: 4.8,
+                distance: 0.3,
+                coords: [39.981, 116.407], // 师范大学西北侧外围
+                address: "师范大学东门商业街5号",
+                hours: "8:30-22:30",
+                recommend: "东坡肉,小笼包,桂花酿",
+                desc: "主打单人套餐，店内有自习区，灯光柔和，禁止大声交谈，适合学习用餐",
+                tags: ["自习区", "单人套餐", "安静"],
+                reviews: [
+                    { content: "江浙菜口味很正宗，单人套餐种类多，边吃边学效率超高", rating: 5, time: "4天前" },
+                    { content: "灯光设计超赞，不刺眼，长时间学习也不累，推荐桂花酿超好喝", rating: 5, time: "1周前" },
+                    { content: "需要提前占座，尤其是期末季，建议早点去", rating: 4, time: "2天前" }
+                ]
+            },
+
+            // 正餐-约会 - 部分在学校之间
+            {
+                id: 4,
+                name: "浪漫西餐厅",
+                scene: ["date"],
+                cuisine: "western",
+                price: 98,
+                rating: 4.9,
+                distance: 0.6,
+                coords: [39.995, 116.400], // 燕京和师范大学之间
+                address: "大学城中心广场18号",
+                hours: "10:00-23:00",
+                recommend: "牛排,意面,红酒",
+                desc: "环境优雅，灯光浪漫，有私密卡座，提供情侣套餐，需提前预约靠窗位置",
+                tags: ["约会首选", "情侣套餐", "私密卡座"],
+                reviews: [
+                    { content: "和npy来的，环境超浪漫，牛排七分熟刚刚好，服务也超贴心", rating: 5, time: "2天前" },
+                    { content: "纪念日来的，店家还送了小蛋糕，氛围感拉满，值得推荐", rating: 5, time: "1周前" },
+                    { content: "价格小贵，但是体验感超棒，建议提前预约靠窗位置", rating: 4, time: "3天前" }
+                ]
+            },
+            {
+                id: 5,
+                name: "江南小筑",
+                scene: ["date"],
+                cuisine: "jiangzhe",
+                price: 88,
+                rating: 4.8,
+                distance: 0.5,
+                coords: [40.000, 116.408], // 华清和师范大学之间
+                address: "大学城湖畔餐厅2号",
+                hours: "11:00-22:00",
+                recommend: "松鼠桂鱼,龙井虾仁,桂花糕",
+                desc: "临湖景观位，江南风格装修，菜品精致，适合情侣约会，有学生折扣",
+                tags: ["景观位", "江南风味", "学生折扣"],
+                reviews: [
+                    { content: "临湖位置超美，晚上看夜景绝了，龙井虾仁超新鲜", rating: 5, time: "4天前" },
+                    { content: "学生凭学生证打9折，性价比瞬间上来了，桂花糕是必点", rating: 4, time: "1周前" },
+                    { content: "周末人有点多，建议工作日去，体验感更好", rating: 4, time: "2天前" }
+                ]
+            },
+            {
+                id: 6,
+                name: "花语餐厅",
+                scene: ["date"],
+                cuisine: "guangdong",
+                price: 82,
+                rating: 4.7,
+                distance: 0.7,
+                coords: [39.998, 116.405], // 三校中心位置
+                address: "大学城文艺街区9号",
+                hours: "10:30-22:30",
+                recommend: "叉烧饭,虾饺,双皮奶",
+                desc: "文艺清新风格，店内有鲜花装饰，粤菜清淡适口，适合约会，提供免费甜品",
+                tags: ["文艺清新", "粤菜", "免费甜品"],
+                reviews: [
+                    { content: "店内全是鲜花，拍照超好看，双皮奶甜而不腻，绝了", rating: 5, time: "3天前" },
+                    { content: "粤菜口味很正宗，分量适中，适合情侣分享，还送免费甜品", rating: 4, time: "1周前" },
+                    { content: "位置有点隐蔽，第一次去可能找不到，建议导航准确点", rating: 4, time: "5天前" }
+                ]
+            },
+
+            // 正餐-聚餐 - 集中分布
+            {
+                id: 7,
+                name: "川味江湖",
+                scene: ["party"],
+                cuisine: "sichuan",
+                price: 68,
+                rating: 4.8,
+                distance: 0.8,
+                coords: [39.992, 116.398], // 燕京大学东侧
+                address: "大学城美食城2楼",
+                hours: "10:00-23:00",
+                recommend: "水煮鱼,毛血旺,夫妻肺片",
+                desc: "可容纳20人聚餐，有大包间，川菜正宗，支持团购，学生聚餐享8折优惠",
+                tags: ["多人聚餐", "大包间", "学生折扣"],
+                reviews: [
+                    { content: "宿舍聚餐选的这家，大包间超宽敞，水煮鱼超入味", rating: 5, time: "1周前" },
+                    { content: "学生聚餐凭学生证打8折，性价比直接拉满，毛血旺必点", rating: 5, time: "3天前" },
+                    { content: "有点辣，不能吃辣的小伙伴记得提前说微辣", rating: 4, time: "2天前" }
+                ]
+            },
+            {
+                id: 8,
+                name: "湘菜馆子",
+                scene: ["party"],
+                cuisine: "hunan",
+                price: 65,
+                rating: 4.7,
+                distance: 0.6,
+                coords: [39.993, 116.400], // 川味江湖旁边
+                address: "大学城餐饮街15号",
+                hours: "11:00-22:30",
+                recommend: "剁椒鱼头,小炒黄牛肉,糖油粑粑",
+                desc: "主打湘菜，适合多人聚餐，有多个包间，可拼桌，提供套餐菜单，性价比高",
+                tags: ["湘菜", "包间", "套餐"],
+                reviews: [
+                    { content: "剁椒鱼头超下饭，小炒黄牛肉嫩到爆，宿舍8个人吃超满足", rating: 5, time: "4天前" },
+                    { content: "套餐比单点划算很多，建议直接点套餐，省事儿又省钱", rating: 4, time: "1周前" },
+                    { content: "包间需要提前预定，尤其是周末，晚了就没了", rating: 4, time: "3天前" }
+                ]
+            },
+            {
+                id: 9,
+                name: "云贵风味馆",
+                scene: ["party"],
+                cuisine: "yungui",
+                price: 72,
+                rating: 4.6,
+                distance: 0.9,
+                coords: [39.994, 116.402], // 前两家旁边
+                address: "大学城聚餐区8号",
+                hours: "9:30-22:00",
+                recommend: "过桥米线,汽锅鸡,鲜花饼",
+                desc: "云贵特色菜，分量足，适合宿舍聚餐，有大圆桌，支持提前预定，送特色小吃",
+                tags: ["云贵菜", "大圆桌", "宿舍聚餐"],
+                reviews: [
+                    { content: "过桥米线分量超大，够两个人吃，汽锅鸡汤超鲜", rating: 5, time: "2天前" },
+                    { content: "预定送特色鲜花饼，超好吃，大圆桌坐10个人没问题", rating: 4, time: "1周前" },
+                    { content: "位置有点偏，但是味道超赞，值得跑一趟", rating: 4, time: "4天前" }
+                ]
+            },
+
+            // 下午茶/咖啡 - 分散分布
+            {
+                id: 10,
+                name: "猫咖咖啡",
+                scene: ["afternoon"],
+                cuisine: "western",
+                price: 28,
+                rating: 4.9,
+                distance: 0.5,
+                coords: [39.990, 116.392], // 燕京大学西北侧
+                address: "大学城文创区6号",
+                hours: "9:00-22:00",
+                recommend: "拿铁,卡布奇诺,猫爪蛋糕",
+                desc: "有可爱猫咪陪伴，咖啡饮品丰富，提供甜品套餐，有自习区域，WiFi速度快",
+                tags: ["猫咖", "甜品", "自习区"],
+                reviews: [
+                    { content: "猫咪超粘人，撸猫+喝咖啡太治愈了，猫爪蛋糕超可爱", rating: 5, time: "1天前" },
+                    { content: "WiFi速度超快，边撸猫边写论文，效率意外的高", rating: 5, time: "3天前" },
+                    { content: "需要消费才能撸猫，最低28元一杯咖啡，性价比还可以", rating: 4, time: "1周前" }
+                ]
+            },
+            {
+                id: 11,
+                name: "云贵茶舍",
+                scene: ["afternoon"],
+                cuisine: "yungui",
+                price: 35,
+                rating: 4.8,
+                distance: 0.4,
+                coords: [40.000, 116.410], // 华清大学西南侧
+                address: "大学城特色街区12号",
+                hours: "10:00-21:30",
+                recommend: "普洱茶,鲜花茶,饵块",
+                desc: "主打云贵特色茶饮，搭配特色小吃，环境安静，有靠窗座位，适合下午茶",
+                tags: ["特色茶饮", "云贵小吃", "安静"],
+                reviews: [
+                    { content: "普洱茶超正宗，鲜花茶颜值超高，拍照发圈绝了", rating: 5, time: "2天前" },
+                    { content: "靠窗位置超舒服，晒着太阳喝茶，太惬意了", rating: 5, time: "1周前" },
+                    { content: "饵块有点吃不惯，建议先点小份试试", rating: 4, time: "4天前" }
+                ]
+            },
+            {
+                id: 12,
+                name: "日式甜品屋",
+                scene: ["afternoon"],
+                cuisine: "japan_korea",
+                price: 32,
+                rating: 4.7,
+                distance: 0.5,
+                coords: [39.987, 116.410], // 师范大学东南侧
+                address: "大学城甜品街5号",
+                hours: "11:00-22:00",
+                recommend: "抹茶大福,铜锣烧,柚子茶",
+                desc: "日式甜品为主，抹茶系列招牌，环境简约清新，适合闺蜜下午茶小聚",
+                tags: ["日式甜品", "抹茶", "闺蜜小聚"],
+                reviews: [
+                    { content: "抹茶大福糯叽叽的，超好吃，柚子茶解腻绝配", rating: 5, time: "3天前" },
+                    { content: "和闺蜜一下午点了5种甜品，都没踩雷，性价比超高", rating: 4, time: "1周前" },
+                    { content: "座位有点少，建议错峰去，不然要等位", rating: 4, time: "2天前" }
+                ]
+            },
+
+            // 夜宵 - 集中在大学城夜市
+            {
+                id: 13,
+                name: "深夜烧烤",
+                scene: ["night"],
+                cuisine: "sichuan",
+                price: 48,
+                rating: 4.7,
+                distance: 0.7,
+                coords: [39.991, 116.403], // 大学城夜市
+                address: "大学城夜市18号",
+                hours: "17:00-凌晨3:00",
+                recommend: "烤串,烤茄子,酸梅汤",
+                desc: "营业到凌晨，主打川味烧烤，支持外卖，价格实惠，适合夜宵小聚",
+                tags: ["夜宵", "烧烤", "营业至凌晨"],
+                reviews: [
+                    { content: "考完试和舍友来搓一顿，烤串超入味，酸梅汤免费续杯", rating: 5, time: "1天前" },
+                    { content: "营业到凌晨3点，赶due到半夜来吃超合适，外卖也很快", rating: 4, time: "3天前" },
+                    { content: "有点辣，不能吃辣的小伙伴慎点，建议微辣", rating: 4, time: "1周前" }
+                ]
+            },
+            {
+                id: 14,
+                name: "韩式炸鸡",
+                scene: ["night"],
+                cuisine: "japan_korea",
+                price: 42,
+                rating: 4.6,
+                distance: 0.8,
+                coords: [39.992, 116.404], // 烧烤旁边
+                address: "大学城小吃区9号",
+                hours: "16:00-凌晨2:00",
+                recommend: "甜辣炸鸡,蜂蜜芥末炸鸡,可乐",
+                desc: "韩式炸鸡配啤酒，夜宵首选，支持外卖，30分钟送达，有学生优惠",
+                tags: ["炸鸡", "夜宵", "外卖"],
+                reviews: [
+                    { content: "甜辣炸鸡外酥里嫩，配可乐绝了，深夜追剧必备", rating: 5, time: "2天前" },
+                    { content: "学生打9折，外卖30分钟必到，超准时，蜂蜜芥末味超赞", rating: 4, time: "1周前" },
+                    { content: "分量有点少，建议点双人份，不然不够吃", rating: 4, time: "4天前" }
+                ]
+            },
+            {
+                id: 15,
+                name: "麻辣烫夜宵",
+                scene: ["night"],
+                cuisine: "other",
+                price: 35,
+                rating: 4.8,
+                distance: 0.6,
+                coords: [39.990, 116.405], // 前两家旁边
+                address: "大学城夜宵街12号",
+                hours: "18:00-凌晨1:00",
+                recommend: "麻辣烫,关东煮,烤冷面",
+                desc: "自选麻辣烫，汤底可选，价格实惠，有座位，适合单人或多人夜宵",
+                tags: ["麻辣烫", "夜宵", "自选"],
+                reviews: [
+                    { content: "汤底有5种可选，番茄汤超浓郁，食材也很新鲜", rating: 5, time: "3天前" },
+                    { content: "一个人来吃也不尴尬，分量自选，价格超亲民", rating: 5, time: "1周前" },
+                    { content: "凌晨1点关门，建议早点去，不然食材会不全", rating: 4, time: "2天前" }
+                ]
+            },
+
+            // 便利店 - 校园内
+            {
+                id: 16,
+                name: "711便利店",
+                scene: ["convenience"],
+                cuisine: "other",
+                price: 18,
+                rating: 4.8,
+                distance: 0.2,
+                coords: [39.990, 116.397], // 燕京大学校内
+                address: "燕京大学西门旁",
+                hours: "24小时营业",
+                recommend: "关东煮,饭团,咖啡",
+                desc: "24小时营业，有热食、便当、饮料，支持校园卡支付，靠近宿舍区",
+                tags: ["24小时", "热食", "校园卡"],
+                reviews: [
+                    { content: "赶due到半夜来买关东煮，24小时营业太友好了，汤超鲜", rating: 5, time: "1天前" },
+                    { content: "支持校园卡支付，不用带现金，饭团超顶饱，性价比高", rating: 4, time: "3天前" },
+                    { content: "有时候关东煮会卖完，建议早点去", rating: 4, time: "1周前" }
+                ]
+            },
+            {
+                id: 17,
+                name: "全家便利店",
+                scene: ["convenience"],
+                cuisine: "other",
+                price: 16,
+                rating: 4.7,
+                distance: 0.1,
+                coords: [40.005, 116.412], // 华清大学校内
+                address: "华清大学北门正对面",
+                hours: "24小时营业",
+                recommend: "早餐包,咖啡,冰淇淋",
+                desc: "24小时营业，早餐种类多，有现磨咖啡，提供加热服务，学生常去",
+                tags: ["24小时", "早餐", "现磨咖啡"],
+                reviews: [
+                    { content: "早餐包超好吃，现磨咖啡也不贵，上课前买超方便", rating: 5, time: "2天前" },
+                    { content: "提供加热服务，冬天吃热乎的超舒服，冰淇淋夏天必买", rating: 4, time: "1周前" },
+                    { content: "位置超近，出校门就到，太方便了", rating: 5, time: "4天前" }
+                ]
+            },
+            {
+                id: 18,
+                name: "罗森便利店",
+                scene: ["convenience"],
+                cuisine: "other",
+                price: 17,
+                rating: 4.9,
+                distance: 0.2,
+                coords: [39.985, 116.405], // 师范大学校内
+                address: "师范大学东门旁",
+                hours: "24小时营业",
+                recommend: "冰皮蛋糕,关东煮,饭团",
+                desc: "24小时营业，网红甜品多，有关东煮、饭团，支持手机支付，方便快捷",
+                tags: ["24小时", "网红甜品", "关东煮"],
+                reviews: [
+                    { content: "冰皮蛋糕yyds，网红款每次去都抢，关东煮汤超好喝", rating: 5, time: "1天前" },
+                    { content: "24小时营业，深夜饿了下楼就能买，太方便了", rating: 5, time: "3天前" },
+                    { content: "价格比普通便利店稍贵，但是胜在品类多，甜品超赞", rating: 4, time: "1周前" }
+                ]
+            },
+
+            // 补充其他品类 - 不均匀分布
+            {
+                id: 19,
+                name: "京味居",
+                scene: ["single", "party"],
+                cuisine: "beijing",
+                price: 58,
+                rating: 4.7,
+                distance: 0.7,
+                coords: [39.988, 116.395], // 燕京大学西南侧
+                address: "大学城特色餐饮街8号",
+                hours: "10:00-21:30",
+                recommend: "烤鸭,炸酱面,爆肚",
+                desc: "主打北京烤鸭、炸酱面，一人食或多人聚餐均可，性价比高",
+                tags: ["京菜", "烤鸭", "性价比"],
+                reviews: [
+                    { content: "烤鸭超正宗，皮脆肉嫩，一人食套餐超划算", rating: 5, time: "4天前" },
+                    { content: "宿舍聚餐点了整只烤鸭，送面饼和酱料，超满足", rating: 4, time: "1周前" },
+                    { content: "爆肚有点腥，建议第一次去的小伙伴慎点", rating: 4, time: "2天前" }
+                ]
+            },
+            {
+                id: 20,
+                name: "日料小馆",
+                scene: ["single", "date"],
+                cuisine: "japan_korea",
+                price: 78,
+                rating: 4.8,
+                distance: 0.5,
+                coords: [40.006, 116.414], // 华清大学东侧
+                address: "大学城日料街3号",
+                hours: "11:00-22:00",
+                recommend: "寿司,拉面,天妇罗",
+                desc: "日式料理，寿司、拉面为主，有单人套餐也有情侣套餐，环境安静",
+                tags: ["日料", "寿司", "安静"],
+                reviews: [
+                    { content: "寿司超新鲜，三文鱼厚切，一口超满足", rating: 5, time: "3天前" },
+                    { content: "情侣套餐超划算，比单点便宜30块，拉面汤超鲜", rating: 4, time: "1周前" },
+                    { content: "位置有点小，但是环境超安静，适合小声聊天", rating: 4, time: "5天前" }
+                ]
+            }
+        ];
+
+        // 4. 全局变量
+        let sortDirection = 'desc'; // 排序方向：desc-降序，asc-升序
+        let mapMarkers = []; // 存储地图标记点
+
+        // 5. 获取标记点颜色
+        function getMarkerColor(scene) {
+            const colorMap = {
+                'single': '#FF9800',
+                'date': '#E91E63',
+                'party': '#9C27B0',
+                'afternoon': '#FF5722',
+                'night': '#F44336',
+                'convenience': '#4CAF50'
+            };
+            return colorMap[scene] || '#FF9800';
+        }
+
+        // 6. 渲染地图标记点（显示餐厅名称）
+        function renderRestaurantMarkers(filteredRestaurants) {
+            // 清除原有标记点
+            mapMarkers.forEach(marker => map.removeLayer(marker));
+            mapMarkers = [];
+
+            filteredRestaurants.forEach(restaurant => {
+                // 获取标记点颜色
+                const color = getMarkerColor(restaurant.scene[0]);
+                
+                // 创建自定义标记点
+                const markerIcon = L.divIcon({
+                    className: 'custom-marker',
+                    html: `
+                        <div style="position: relative;">
+                            <div style="background-color: ${color}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; position: absolute; top: 0; left: 0;"></div>
+                            <div class="restaurant-label" style="position: absolute; top: -5px; left: 15px;">${restaurant.name}</div>
+                        </div>
+                    `,
+                    iconSize: [150, 20],
+                    iconAnchor: [8, 10]
+                });
+
+                // 添加标记点到地图
+                const marker = L.marker(restaurant.coords, { icon: markerIcon }).addTo(map);
+                marker.bindPopup(`<b>${restaurant.name}</b><br>人均：¥${restaurant.price}`);
+                
+                // 点击标记点显示详情
+                marker.on('click', () => showRestaurantDetail(restaurant));
+                
+                mapMarkers.push(marker);
+            });
+        }
+
+        // 7. 渲染餐厅列表
+        function renderRestaurantList(filteredRestaurants) {
+            const listContainer = document.getElementById('restaurant-list');
+            listContainer.innerHTML = '';
+
+            if (filteredRestaurants.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="text-center py-10 text-gray-500">
+                        <i class="fa fa-search text-4xl mb-3"></i>
+                        <p class="text-lg">未找到符合条件的餐厅</p>
+                        <button id="reset-filter" class="mt-3 px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600">
+                            重置筛选条件
+                        </button>
+                    </div>
+                `;
+                document.getElementById('reset-filter').addEventListener('click', resetFilters);
+                return;
+            }
+
+            filteredRestaurants.forEach(restaurant => {
+                // 构建标签HTML
+                let tagsHtml = '';
+                restaurant.tags.slice(0, 3).forEach(tag => {
+                    let tagColor = '';
+                    if (tag.includes('自习')) tagColor = 'bg-green-100 text-green-800';
+                    else if (tag.includes('约会')) tagColor = 'bg-pink-100 text-pink-800';
+                    else if (tag.includes('聚餐')) tagColor = 'bg-purple-100 text-purple-800';
+                    else if (tag.includes('夜宵')) tagColor = 'bg-red-100 text-red-800';
+                    else if (tag.includes('24小时')) tagColor = 'bg-blue-100 text-blue-800';
+                    else tagColor = 'bg-gray-100 text-gray-800';
+                    
+                    tagsHtml += `<span class="tag ${tagColor}">${tag}</span>`;
+                });
+
+                const item = document.createElement('div');
+                item.className = 'restaurant-item';
+                item.dataset.id = restaurant.id;
+                item.innerHTML = `
+                    <div class="font-bold text-lg">${restaurant.name} · ¥${restaurant.price}/人</div>
+                    <div class="text-gray-600 text-sm mt-1">推荐：${restaurant.recommend}</div>
+                    <div class="mt-2">${tagsHtml}</div>
+                `;
+
+                // 点击列表项显示详情
+                item.addEventListener('click', () => showRestaurantDetail(restaurant));
+
+                listContainer.appendChild(item);
+            });
+        }
+
+        // 8. 筛选餐厅
+        function filterRestaurants() {
+            const scene = document.getElementById('filter-scene').value;
+            const cuisine = document.getElementById('filter-cuisine').value;
+            const sortType = document.getElementById('filter-sort').value;
+            const search = document.getElementById('search-input').value.toLowerCase().trim();
+
+            // 基础筛选
+            let filtered = restaurants.filter(restaurant => {
+                // 场景筛选
+                if (scene !== 'all' && !restaurant.scene.includes(scene)) return false;
+                // 菜品筛选
+                if (cuisine !== 'all' && restaurant.cuisine !== cuisine) return false;
+                // 搜索筛选
+                if (search && !restaurant.name.toLowerCase().includes(search) && 
+                    !restaurant.recommend.toLowerCase().includes(search) &&
+                    !restaurant.tags.some(tag => tag.toLowerCase().includes(search))) {
+                    return false;
+                }
+                return true;
+            });
+
+            // 排序逻辑
+            filtered.sort((a, b) => {
+                let valueA, valueB;
+                switch (sortType) {
+                    case 'rating':
+                        valueA = a.rating;
+                        valueB = b.rating;
+                        break;
+                    case 'price':
+                        valueA = a.price;
+                        valueB = b.price;
+                        break;
+                    case 'distance':
+                        valueA = a.distance;
+                        valueB = b.distance;
+                        break;
+                    default:
+                        valueA = a.rating;
+                        valueB = b.rating;
+                }
+
+                if (sortDirection === 'desc') {
+                    return valueB - valueA;
+                } else {
+                    return valueA - valueB;
+                }
+            });
+
+            // 渲染标记和列表
+            renderRestaurantMarkers(filtered);
+            renderRestaurantList(filtered);
+        }
+
+        // 9. 显示餐厅详情弹窗
+        function showRestaurantDetail(restaurant) {
+            const modal = document.getElementById('detail-modal');
+            const content = document.getElementById('detail-content');
+
+            // 场景文本
+            const sceneMap = {
+                single: '正餐-一人食（自习）',
+                date: '正餐-约会',
+                party: '正餐-聚餐',
+                afternoon: '下午茶/咖啡',
+                night: '夜宵',
+                convenience: '便利店'
+            };
+            let sceneText = restaurant.scene.map(s => sceneMap[s]).join('、');
+
+            // 菜式文本
+            const cuisineMap = {
+                sichuan: '川菜', 
+                beijing: '京菜', 
+                hunan: '湘菜', 
+                guangdong: '粤菜',
+                jiangzhe: '江浙菜', 
+                yungui: '云贵菜', 
+                japan_korea: '日韩',
+                western: '西餐', 
+                other: '其他'
+            };
+            const cuisineText = cuisineMap[restaurant.cuisine] || '其他';
+
+            // 构建标签HTML
+            let tagsHtml = '';
+            restaurant.tags.forEach(tag => {
+                let tagColor = '';
+                if (tag.includes('自习')) tagColor = 'bg-green-100 text-green-800';
+                else if (tag.includes('约会')) tagColor = 'bg-pink-100 text-pink-800';
+                else if (tag.includes('聚餐')) tagColor = 'bg-purple-100 text-purple-800';
+                else if (tag.includes('夜宵')) tagColor = 'bg-red-100 text-red-800';
+                else if (tag.includes('24小时')) tagColor = 'bg-blue-100 text-blue-800';
+                else tagColor = 'bg-gray-100 text-gray-800';
+                
+                tagsHtml += `<span class="tag ${tagColor}">${tag}</span>`;
+            });
+
+            // 生成星级评分
+            function generateStars(rating) {
+                let stars = '';
+                const fullStars = Math.floor(rating);
+                const halfStar = rating % 1 >= 0.5;
+                
+                for (let i = 0; i < fullStars; i++) {
+                    stars += '<i class="fa fa-star"></i>';
+                }
+                
+                if (halfStar) {
+                    stars += '<i class="fa fa-star-half-o"></i>';
+                }
+                
+                const emptyStars = 5 - fullStars - (halfStar ? 1 : 0);
+                for (let i = 0; i < emptyStars; i++) {
+                    stars += '<i class="fa fa-star-o"></i>';
+                }
+                
+                return stars;
+            }
+
+            // 构建评价HTML
+            let reviewsHtml = '';
+            restaurant.reviews.forEach(review => {
+                reviewsHtml += `
+                    <div class="border-b pb-3 mb-3">
+                        <div class="flex items-center mb-2">
+                            <div class="text-yellow-500 mr-2">
+                                ${generateStars(review.rating)}
+                            </div>
+                            <span class="text-gray-500 text-sm ml-2">${review.time}</span>
+                        </div>
+                        <p class="text-gray-700">${review.content}</p>
+                    </div>
+                `;
+            });
+
+            // 填充详情
+            content.innerHTML = `
+                <h2 class="text-2xl font-bold mb-2">${restaurant.name}</h2>
+                <div class="border-b pb-3 mb-3">
+                    <div class="flex items-center mb-2">
+                        <div class="text-yellow-500 mr-2">
+                            ${generateStars(restaurant.rating)}
+                        </div>
+                        <span class="font-bold">${restaurant.rating}</span>
+                        <span class="text-gray-500 ml-2">人均 ¥${restaurant.price}</span>
+                        <span class="text-gray-500 ml-2">距离 ${restaurant.distance}km</span>
+                    </div>
+                    <div class="flex flex-wrap gap-2 mb-3">
+                        ${tagsHtml}
+                    </div>
+                    <div class="text-gray-700 space-y-1">
+                        <p><i class="fa fa-map-marker text-red-500 mr-2"></i>地址：${restaurant.address}</p>
+                        <p><i class="fa fa-clock-o text-blue-500 mr-2"></i>营业时长：${restaurant.hours}</p>
+                        <p><i class="fa fa-tag text-orange-500 mr-2"></i>适用场景：${sceneText}</p>
+                        <p><i class="fa fa-cutlery text-purple-500 mr-2"></i>菜式分类：${cuisineText}</p>
+                        <p><i class="fa fa-star text-yellow-500 mr-2"></i>推荐菜：${restaurant.recommend}</p>
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <h3 class="font-bold mb-1">特色描述：</h3>
+                    <p class="text-gray-700">${restaurant.desc}</p>
+                </div>
+                <div class="mb-4">
+                    <h3 class="font-bold mb-1">学生评价：</h3>
+                    ${reviewsHtml}
+                </div>
+                <div class="flex gap-3">
+                    <button class="flex-1 px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 transition" onclick="navigateToRestaurant(${restaurant.id})">
+                        <i class="fa fa-navicon mr-1"></i> 导航前往
+                    </button>
+                    <button class="flex-1 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition" onclick="map.setView([${restaurant.coords[0]}, ${restaurant.coords[1]}], 16)">
+                        <i class="fa fa-map mr-1"></i> 定位到地图
+                    </button>
+                </div>
+            `;
+
+            // 显示弹窗
+            modal.style.display = 'flex';
+        }
+
+        // 10. 导航功能
+        function navigateToRestaurant(restaurantId) {
+            const restaurant = restaurants.find(r => r.id === restaurantId);
+            alert(`已为你导航至：${restaurant.name}\n地址：${restaurant.address}`);
+        }
+
+        // 11. 切换排序方向
+        function toggleSortDirection() {
+            const toggleBtn = document.getElementById('sort-toggle');
+            const directionText = document.getElementById('sort-direction');
+            
+            sortDirection = sortDirection === 'desc' ? 'asc' : 'desc';
+            
+            if (sortDirection === 'desc') {
+                toggleBtn.innerHTML = '<i class="fa fa-sort-amount-desc"></i>';
+                directionText.textContent = '高→低';
+                toggleBtn.classList.remove('flipped');
+            } else {
+                toggleBtn.innerHTML = '<i class="fa fa-sort-amount-asc"></i>';
+                directionText.textContent = '低→高';
+                toggleBtn.classList.add('flipped');
+            }
+            
+            filterRestaurants();
+        }
+
+        // 12. 重置筛选条件
+        function resetFilters() {
+            document.getElementById('filter-scene').value = 'all';
+            document.getElementById('filter-cuisine').value = 'all';
+            document.getElementById('filter-sort').value = 'rating';
+            document.getElementById('search-input').value = '';
+            sortDirection = 'desc';
+            document.getElementById('sort-toggle').innerHTML = '<i class="fa fa-sort-amount-desc"></i>';
+            document.getElementById('sort-direction').textContent = '高→低';
+            document.getElementById('sort-toggle').classList.remove('flipped');
+            filterRestaurants();
+        }
+
+        // 13. 初始化弹窗
+        function initModals() {
+            // 详情弹窗
+            document.getElementById('close-detail').addEventListener('click', () => {
+                document.getElementById('detail-modal').style.display = 'none';
+            });
+
+            // 评价弹窗（备用）
+            document.getElementById('close-review').addEventListener('click', () => {
+                document.getElementById('review-modal').style.display = 'none';
+            });
+
+            // 添加餐厅弹窗
+            const addBtn = document.getElementById('add-restaurant-btn');
+            const addModal = document.getElementById('add-modal');
+            const closeAddBtn = document.getElementById('close-add');
+            const cancelAddBtn = document.getElementById('cancel-add');
+            const addForm = document.getElementById('add-restaurant-form');
+            const successModal = document.getElementById('success-modal');
+            const closeSuccessBtn = document.getElementById('close-success');
+
+            addBtn.addEventListener('click', () => {
+                addModal.style.display = 'flex';
+            });
+
+            function closeAddModal() {
+                addModal.style.display = 'none';
+                addForm.reset();
+            }
+
+            closeAddBtn.addEventListener('click', closeAddModal);
+            cancelAddBtn.addEventListener('click', closeAddModal);
+
+            addForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                addModal.style.display = 'none';
+                successModal.style.display = 'flex';
+                addForm.reset();
+            });
+
+            closeSuccessBtn.addEventListener('click', () => {
+                successModal.style.display = 'none';
+            });
+
+            // 点击外部关闭弹窗
+            window.addEventListener('click', (e) => {
+                if (e.target.classList.contains('modal')) {
+                    e.target.style.display = 'none';
+                }
+            });
+        }
+
+        // 14. 绑定事件
+        function bindEvents() {
+            // 筛选事件
+            document.getElementById('filter-scene').addEventListener('change', filterRestaurants);
+            document.getElementById('filter-cuisine').addEventListener('change', filterRestaurants);
+            document.getElementById('filter-sort').addEventListener('change', filterRestaurants);
+            document.getElementById('search-input').addEventListener('input', filterRestaurants);
+            
+            // 排序翻转事件
+            document.getElementById('sort-toggle').addEventListener('click', toggleSortDirection);
+        }
+
+        // 15. 初始化
+        function init() {
+            initModals();
+            bindEvents();
+            filterRestaurants(); // 初始显示所有餐厅
+        }
+
+        // 页面加载完成后初始化
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
